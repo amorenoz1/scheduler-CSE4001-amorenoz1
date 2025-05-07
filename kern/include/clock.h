@@ -44,6 +44,9 @@
 
 /* hardclocks per second */
 #define HZ  100
+#define SCHEDULE_HARDCLOCKS 4
+#define MIGRATE_HARDCLOCKS 16
+
 int get_timeslice(int priority);
 void hardclock_bootstrap(void);
 void hardclock(void);

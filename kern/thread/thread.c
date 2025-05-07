@@ -57,9 +57,20 @@
 
 
 // #define MLFQ // here define the scheduling algorithm
+#define MLFQ
 #ifdef MLFQ
-   #define NUM_QUEUES 3  // Q0 (high), Q1, Q2 (low)
-   struct threadlist mlfq[NUM_QUEUES];
+#define MLFQ_LEVELS 3
+#define SCHEDULE_HARDCLOCKS 4
+#define MIGRATE_HARDCLOCKS 16
+
+   static struct threadlist mlfq[MLFQ_LEVELS];
+
+   // To be called during system/thread subsystem initialization
+   void mlfq_init(void) {
+       for (int i = 0; i < MLFQ_LEVELS; ++i) {
+           threadlist_init(&mlfq[i]);
+       }
+   }
 #endif
 
 /* Magic number used as a guard value on kernel thread stacks. */
@@ -385,9 +396,7 @@ void
 thread_bootstrap(void)
 {
    #ifdef MLFQ
-      for (int i = 0; i < NUM_QUEUES; i++) {
-         threadlist_init(&mlfq[i]);
-      }
+      mlfq_init();
    #endif
 
 	cpuarray_init(&allcpus);
@@ -486,7 +495,9 @@ thread_make_runnable(struct thread *target, bool already_have_lock)
 	/* Target thread is now ready to run; put it on the run queue. */
 	target->t_state = S_READY;
    #ifdef MLFQ 
-      threadlist_addtail(&mlfq[target->t_priority], target);
+      target->t_priority = 0; // new threads start at highest
+      target->t_ticks_left = 0;
+      threadlist_addtail(&mlfq[target->t_priority], target);   
    #else
       threadlist_addtail(&targetcpu->c_runqueue, target);
    #endif
@@ -669,7 +680,7 @@ thread_switch(threadstate_t newstate, bool istimer,
 	curcpu->c_isidle = true;
 	do {
       #ifdef MLFQ 
-         for (int i = 0; i < NUM_QUEUES; i++) {
+         for (int i = 0; i < MLFQ_LEVELS; i++) {
             next = threadlist_remhead(&mlfq[i]);
             if (next != NULL) {
                break;
@@ -870,7 +881,35 @@ thread_timeryield(void)
 void
 schedule(void)
 {
-   // thread_timeryield();
+   // Aging threshold: number of hardclock ticks a thread can wait before promotion
+   const int AGING_THRESHOLD = 32;
+
+   // No-op if CPU is idle
+   if (curcpu->c_isidle) {
+      return;
+   }
+
+   // Promote aging threads from lower-priority queues
+   for (int i = MLFQ_LEVELS - 1; i > 0; i--) {
+      struct threadlist *queue = &mlfq[i];
+      struct threadlistnode *node = queue->tl_head.tln_next;
+
+      while (node != &queue->tl_tail) {
+         struct thread *t = node->tln_self;
+         struct threadlistnode *next_node = node->tln_next;
+
+         // Aging: promote if waited long enough
+         t->t_ticks_left+= SCHEDULE_HARDCLOCKS;
+         if (t->t_ticks_left>= AGING_THRESHOLD) {
+            threadlist_remove(queue, t);
+            t->t_priority--;
+            t->t_ticks_left = 0;
+            threadlist_addtail(&mlfq[t->t_priority], t);
+         }
+
+         node = next_node;
+      }
+   }
 }
 
 /*

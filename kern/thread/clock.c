@@ -52,7 +52,7 @@
  */
 #define SCHEDULE_HARDCLOCKS	4	/* Reschedule every 4 hardclocks. */
 #define MIGRATE_HARDCLOCKS	16	/* Migrate every 16 hardclocks. */
-// #define MLFQ
+#define MLFQ
 #define NUM_QUEUES 3  // Q0 (high), Q1, Q2 (low)
 /*
  * Once a second, everything waiting on lbolt is awakened by CPU 0.
@@ -139,7 +139,6 @@ hardclock(void)
          }
       }
    #endif
-	thread_timeryield();
 }
 
 /*
